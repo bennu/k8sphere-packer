@@ -143,7 +143,3 @@ dpkg -i *.deb && apt-get install -yf
 cd -
 rm -rf $kernel_dir
 update-grub
-
-# apt-get install -yq byobu
-# purge-old-kernels
-# update-grub
