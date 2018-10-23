@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+
+set -eux
+
+# Disable swap and keep it from being mounted
+
+swapoff -a
+sed -i -e '/swap/d' /etc/fstab
+
+# Set locale
+
+echo "LC_ALL=en_US.UTF-8" >> /etc/environment
+
+##
+# OS Tools
+##
+
+apt-get update
+apt-get upgrade -qy
+apt-get install -qy \
+    apt-transport-https \
+    btrfs-tools \
+    ca-certificates \
+    curl \
+    git \
+    htop \
+    jq \
+    libseccomp2 \
+    net-tools \
+    nfs-common \
+    socat \
+    software-properties-common \
+    tar \
+    unzip \
+    util-linux \
+    vim \
+    wget
+
+##
+# OpenVM tools
+##
+
+apt-get install -qy \
+    net-tools \
+    open-vm-tools \
+    perl
+
+##
+# Ansible
+##
+
+apt-add-repository ppa:ansible/ansible -y
+apt-get update
+apt-get install -qy \
+    ansible \
+    python \
+    python-pip
+
+pip install -U \
+  pip \
+  ansible-modules-hashivault \
+  hvac \
+  jinja2 \
+  netaddr \
+  pbr \
+  virtualenv
+
+##
+# kata on containerd & kubernetes
+##
+
+echo "deb http://download.opensuse.org/repositories/home:/katacontainers:/release/xUbuntu_$(lsb_release -rs)/ /" | tee /etc/apt/sources.list.d/kata-containers.list
+curl -sL  http://download.opensuse.org/repositories/home:/katacontainers:/release/xUbuntu_$(lsb_release -rs)/Release.key | apt-key add -
+apt-get update
+apt-get -qy install kata-runtime kata-proxy kata-shim
+
+# containerd
+
+mkdir -p /etc/cni/net.d/ /etc/containerd/
+
+cat << EOT | tee /etc/containerd/config.toml
+[plugins]
+    [plugins.cri.containerd]
+      [plugins.cri.containerd.untrusted_workload_runtime]
+        runtime_type = "io.containerd.runtime.v1.linux"
+        runtime_engine = "/usr/bin/kata-runtime"
+EOT
+
+cd /tmp/
+
+export CONTAINERD_VERSION="1.1.4"
+wget https://storage.googleapis.com/cri-containerd-release/cri-containerd-${CONTAINERD_VERSION}.linux-amd64.tar.gz
+sha256sum cri-containerd-${CONTAINERD_VERSION}.linux-amd64.tar.gz
+curl https://storage.googleapis.com/cri-containerd-release/cri-containerd-${CONTAINERD_VERSION}.linux-amd64.tar.gz.sha256
+tar --no-overwrite-dir -C / -xzf cri-containerd-${CONTAINERD_VERSION}.linux-amd64.tar.gz
+rm -f cri-containerd-${CONTAINERD_VERSION}.linux-amd64.tar.gz
+systemctl daemon-reload
+systemctl start containerd
+systemctl enable containerd
+
+# kubernetes
+
+curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
+cat <<EOF >/etc/apt/sources.list.d/kubernetes.list
+deb http://apt.kubernetes.io/ kubernetes-xenial main
+EOF
+
+apt-get update
+apt-get install -qy \
+    kubelet \
+    kubeadm \
+    kubectl
+apt-mark hold \
+    kubelet \
+    kubeadm \
+    kubectl
+
+# Patch kubelet to use containerd
+
+cat <<EOF >>/etc/modules
+br_netfilter
+ip_vs
+ip_vs_rr
+ip_vs_wrr
+ip_vs_sh
+nf_conntrack_ipv4
+EOF
+
+cat <<EOF >/etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.ipv4.ip_forward = 1
+EOF
+
+sysctl --system
+
+cat <<EOF >/etc/systemd/system/kubelet.service.d/0-containerd.conf
+[Service]
+Environment="KUBELET_EXTRA_ARGS= --runtime-cgroups=/system.slice/containerd.service --container-runtime=remote --runtime-request-timeout=15m --container-runtime-endpoint=unix:///run/containerd/containerd.sock"
+EOF
+
+systemctl daemon-reload
+systemctl start kubelet
+systemctl enable kubelet
+
+###
+# upgrade kernel to 4.15.x
+###
+
+export kernel_dir=$(mktemp -d)
+cd $kernel_dir
+wget http://kernel.ubuntu.com/~kernel-ppa/mainline/v4.15.18/linux-headers-4.15.18-041518_4.15.18-041518.201804190330_all.deb
+wget http://kernel.ubuntu.com/~kernel-ppa/mainline/v4.15.18/linux-headers-4.15.18-041518-generic_4.15.18-041518.201804190330_amd64.deb
+wget http://kernel.ubuntu.com/~kernel-ppa/mainline/v4.15.18/linux-image-4.15.18-041518-generic_4.15.18-041518.201804190330_amd64.deb
+
+dpkg -i *.deb && apt-get install -yf
+cd -
+rm -rf $kernel_dir
+update-grub

@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+
+set -eux
+
+# Disable swap and keep it from being mounted
+
+swapoff -a
+sed -i -e '/swap/d' /etc/fstab
+
+# Set locale
+
+echo "LC_ALL=en_US.UTF-8" >> /etc/environment
+
+##
+# OS Tools
+##
+
+apt-get update
+apt-get upgrade -qy
+apt-get install -qy \
+    apt-transport-https \
+    bridge-utils
+    ca-certificates \
+    curl \
+    git \
+    htop \
+    jq \
+    net-tools \
+    nfs-common \
+    nmap \
+    software-properties-common \
+    telnet \
+    tmux \
+    unzip \
+    vim
+
+##
+# OpenVM tools
+##
+
+apt-get install -qy \
+    net-tools \
+    open-vm-tools \
+    perl
+
+##
+# Ansible
+##
+
+apt-add-repository ppa:ansible/ansible -y
+apt-get update
+apt-get install -qy \
+    ansible \
+    python \
+    python-pip
+
+pip install -U \
+  pip \
+  ansible-modules-hashivault \
+  docker \
+  hvac \
+  jinja2 \
+  netaddr \
+  pbr \
+  virtualenv
+
+##
+# Docker & Kubernetes
+##
+
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+add-apt-repository \
+   "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
+   $(lsb_release -cs) \
+   stable"
+
+curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
+cat <<EOF >/etc/apt/sources.list.d/kubernetes.list
+deb http://apt.kubernetes.io/ kubernetes-xenial main
+EOF
+
+export docker_version=18.06.1~ce~3-0~ubuntu
+
+apt-get update
+apt-get install -qy \
+    docker-ce=$docker_version \
+    kubelet \
+    kubeadm \
+    kubectl
+apt-mark hold \
+    docker-ce \
+    kubelet \
+    kubeadm \
+    kubectl
+
+unset docker_version
+
+cat <<EOF >>/etc/modules
+ip_vs
+ip_vs_rr
+ip_vs_wrr
+ip_vs_sh
+nf_conntrack_ipv4
+EOF
+
+cat <<EOF >/etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.ipv4.ip_forward = 1
+EOF
+
+sysctl --system
+
+###
+# upgrade kernel to 4.15.x
+###
+
+export kernel_dir=$(mktemp -d)
+cd $kernel_dir
+wget http://kernel.ubuntu.com/~kernel-ppa/mainline/v4.15.18/linux-headers-4.15.18-041518_4.15.18-041518.201804190330_all.deb
+wget http://kernel.ubuntu.com/~kernel-ppa/mainline/v4.15.18/linux-headers-4.15.18-041518-generic_4.15.18-041518.201804190330_amd64.deb
+wget http://kernel.ubuntu.com/~kernel-ppa/mainline/v4.15.18/linux-image-4.15.18-041518-generic_4.15.18-041518.201804190330_amd64.deb
+
+dpkg -i *.deb && apt-get install -yf
+cd -
+rm -rf $kernel_dir
+update-grub
