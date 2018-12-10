@@ -1,8 +1,8 @@
-# Kubernetes images for vSphere
+# k8sphere VM templates
 
-Personal kubernetes ubuntu-based images for vSphere, made by Packer.
+Companion VM templates for k8sphere, built with Packer.
 
-**Note:** This image installs kernel v4.15.x
+**Note:** This image installs kernel v4.15.x, still you can edit and adjust the image to your needs.
 
 This repo contains 3 flavors:
 

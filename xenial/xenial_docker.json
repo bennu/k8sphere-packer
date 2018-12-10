@@ -31,7 +31,7 @@
         "iso_checksum": "c94de1cc2e10160f325eb54638a5b5aa38f181d60ee33dae9578d96d932ee5f8",
 
         "username" : "root",
-        "password" : "58322e5053ccdbd65"
+        "password" : "k8sphere"
     },  
     "builders": [
     {
